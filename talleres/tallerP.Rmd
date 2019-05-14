@@ -1,0 +1,171 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+a = sqrt(3)
+b = 1/4 
+c = 11 
+w = 1/2
+```
+
+
+
+```{r}
+"
+rungekutta = function(f,t0,y0,h,n){
+  t = seq(t0, t0+n*h, by=h)
+  y = rep(NA, times=(n+1))
+  
+  y[1] = y0
+  for(k in 2:(n+1)){
+    k1=h/2*f(t[k-1],y[k-1])
+    k2=h/2*f(t[k-1]+h/2, y[k-1]+k1)
+    k3=h/2*f(t[k-1]+h/2, y[k-1]+k2)
+    k4=h/2*f(t[k-1]+h, y[k-1]+2*k3)
+    y[k] = y[k-1]+1/3*(k1+2*k2+2*k3+k4)
+  }
+  return(data.frame(X = t, Y = y))
+}
+"
+
+rungekutta = function(f,t0,y0,h,n){
+  t = seq(t0, t0+n*h, by=h)
+  y = rep(NA, times=(n+1))
+  # length(t)==length(y)
+  y[1] = y0
+  for(k in 2:(n+1)){
+    k1=h/2*f(t[k-1],y[k-1])
+    k2=h/2*f(t[k-1]+h/2, y[k-1]+k1)
+    k3=h/2*f(t[k-1]+h/2, y[k-1]+k2)
+    k4=h/2*f(t[k-1]+h, y[k-1]+2*k3)
+    y[k] = y[k-1]+1/3*(k1+2*k2+2*k3+k4)
+  }
+  dat = cbind(t,y)
+  print(as.matrix(dat))
+  plot(t,y,pch=20, col="red")
+}
+
+euler1 = function(f, t0, y0, h, n) {
+  #Datos igualmente espaciados iniciando en x0 = a, paso h. "n" datos
+  t = seq(t0, t0 + (n-1)*h, by = h) # n datos
+  y = rep(NA, times=n)
+  # n datos
+  y[1]=y0
+  for(i in 2:n ) y[i]= y[i-1]+h*f(t[i-1], y[i-1])
+  print(cbind(t,y))
+  # print
+  plot(t,y, pch=19, col="red")
+  # gráfica
+}
+
+graficar<-function(e1, col="red"){
+  i=1
+  while(i<=nrow(e1))
+  {
+    lines(e1$X, e1$Y, col=col)
+    i = i+1
+  }
+}
+
+```
+
+
+```{r}
+
+a = sqrt(3)
+b = 1/4 
+c = 11 
+w = 1/2
+
+# falta modificar esta funcion 
+f = function(x,y) 1-x^2+(x+y)
+
+t0 = 0; y0 = 1; 
+
+# punto 1 
+h = 0.1
+rungekutta(f, t0,y0,h,20)
+h = 0.2
+rungekutta(f, t0,y0,h,20)
+
+
+
+
+# punto 2 
+
+b = 1/4
+ff <- function(x,y) { 3*x - b*y }
+ff2<- function(x,y) { 5*x - 4*y }
+
+x0 <- 3
+y0 <- 6
+
+x = 7.5
+y = -9
+
+x <-  ff(x0,y0)
+y <- ff2(x0,y0)
+
+print("euler: ")
+euler1( f , ff(x0,y0) , ff2(x0,y0) ,h ,10 )
+
+x <- c()
+y <- c()
+
+for( i in 0:10)
+{
+  x <- c(x, ff(x0 + i,y0 + i  ) )
+  y <- c(y, ff2(x0 + i,y0 + i))
+
+}
+print("real: ")
+print(x)
+
+#plot( ,type="l",asp=1)
+
+
+lines( x , y, col = 3)
+
+
+    
+
+```
+
+
+```{r}
+
+euler1 <- function(f,f2,t0, y0, h, n) 
+{
+  #Datos igualmente espaciados iniciando en x0 = a, paso h. "n" datos t = seq(t0, t0 + (n-1)*h, by = h) # n datos
+  y = rep(NA, times=n) # n datos
+  y[1]=y0
+  x = rep(NA, times=n) # n datos
+  x[1]=t0
+  t <- c()
+  for(i in 2:n ) x[i]= x[i-1]+h*f(t[i-1], x[i-1])
+  for(i in 2:n ) y[i]= y[i-1]+h*f2(t[i-1], y[i-1])
+  print(cbind(t,y)) # print
+  plot(t,y, pch=19, col="red") # gráfica
+}
+
+xprima = function(x,y) 3*x-0.2*y
+
+yprima <- function(x,y) 5*x-4*y
+
+n=10
+x0=3
+y0=6
+h=0.1
+
+
+euler1(xprima,yprima,x0, y0,h,n)
+
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.

@@ -1,0 +1,398 @@
+---
+title: "taller ecuaciones "
+output: html_notebook
+---
+ libreria mosaicCalc
+ sacado de : https://rdrr.io/cran/mosaicCalc/src/R/integrateODE.R
+ tuve problemas descargandola, por lo que copie las funciones
+```{r}
+#' @importFrom stats approxfun
+#' @rdname mosaic-internal
+#' @keywords internal
+#' @param x a list
+#' @return a list with two slots: names and functions
+
+fetchDynamics <- function(x) {
+  inputs <- x
+  formInds <- which( sapply( inputs, function(x) inherits(x, 'formula') ) )
+
+  dnames <- c()
+  dfuns <- c()
+  for (k in 1:length(formInds) ) {
+    form = inputs[[formInds[k]]]
+    nm = form[[2]] # should be name type so double [[ ]]
+    if ( ! inherits(nm, "name") ) stop(paste("Invalid name on LHS of formula",nm))
+    nm = as.character(nm)
+    if (grep("^d",nm)!=1) stop("Dynamical variables must start with 'd'")
+    dnames[k] <- sub("^d","",nm) # character string with the name
+    dfuns[k] <- parse(text=form[3]) # an expression so single [ ]
+  }
+  return ( list(names = dnames, functions=dfuns) )
+}
+
+
+#' construct a function representing the dynamics
+#'
+#' parameters are stored as extra arguments
+#' the order of the dynamical variables (and "t") is important and will be used
+#' later
+#'
+#' @rdname mosaic-internal
+#' @keywords internal
+#' @param DE representation of DE, the result of fetchDynamics
+#' @param additionalAssignments, a list
+#' return a function
+#'
+dynamicsFunction <- function( DE, additionalAssignments=list() ) {
+  dynfun = function(){}
+  body(dynfun) = parse(text=paste("c(",paste(DE$names,DE$functions,collapse=",",sep="="),")",sep=""))
+
+  # construct the dynamical variable argument list
+  tstring=ifelse(! "t"%in% DE$names,",t=","")
+  # create the dynamical variables as arguments to the function
+  dynArgs = eval(parse(
+           text=paste("alist(",  paste(DE$names,"=",collapse=",",sep=""), tstring,")")))
+  formals(dynfun) = c(dynArgs,additionalAssignments)
+  return(dynfun)
+}
+
+#' Create a functions with a vector argument of state, for use in rk()
+#'
+#' @rdname mosaic-internal
+#' @keywords internal
+#' @param DE representation of DE, the result of fetchDynamics
+#' @param additionalAssignments, a list
+#' return a function
+
+rkFunction <- function(DE, additionalArguments=list() ) {
+  result <- function(state,t) {}
+  tstring <- ifelse(! "t"%in% DE$names,",t","")
+  dynfun <- dynamicsFunction(DE, additionalArguments)
+  bodyString <- paste("dynfun(",
+    paste("state[",1:length(DE$names),"]",sep="",collapse=","),tstring,")")
+  body(result) <- parse(text=bodyString)
+  return(result)
+}
+
+#' Integrate ordinary differential equations
+#'
+#' A formula interface to integration of an ODE with respect to "t"
+#'
+#' @param dyn a formula specifying the dynamics, e.g. \code{dx ~ -a*x} for $dx/dt = -ax$.
+#' @param \ldots arguments giving additional formulas for dynamics in other variables,
+#' assignments of parameters, and assignments of initial conditions
+#' @param tdur the duration of integration.  Or, a list of the form
+#' \code{list(from=5,to=10,dt=.001)}
+#'
+#' @details
+#' The equations must be in first-order form.  Each dynamical equation uses
+#' a formula interface with the variable name given on the left-hand side of the
+#' formula, preceded by a \code{d}, so use \code{dx~-k*x} for exponential decay.
+#' All parameters (such as \code{k}) must be assigned numerical values in the
+#' argument list.  All dynamical variables must be assigned initial conditions in the
+#' argument list.  The returned value will be a list with one component named after each
+#' dynamical variable.  The component will be a spline-generated function of \code{t}.
+#'
+#'
+#' @return a list with splined function of time for each dynamical variable
+#'
+#' @examples
+#' soln = integrateODE(dx~r*x*(1-x/k), k=10, r=.5, tdur=20, x=1)
+#' soln$x(10)
+#' soln$x(30) # outside the time interval for integration
+#' # plotFun(soln$x(t)~t, tlim=range(0,20))
+#' soln2 = integrateODE(dx~y, dy~-x, x=1, y=0, tdur=10)
+#' # plotFun(soln2$y(t)~t, tlim=range(0,10))
+#' # SIR epidemic
+#' epi = integrateODE(dS~ -a*S*I, dI ~ a*S*I - b*I, a=0.0026, b=.5, S=762, I=1, tdur=20)
+#' @export
+
+integrateODE = function(dyn,...,tdur) {
+  new <- TRUE
+  inputs <- list(dyn,...)
+  # set up the integration parameters
+  if( missing(tdur) ) tdur = list(from=0, to=1, dt=0.01)
+  if( is.numeric(tdur) ) tdur = list(from=0,to=tdur,dt=0.01)
+  if( is.null(tdur$from) ) tdur$from = 0
+  if( is.null(tdur$dt) ) tdur$dt = diff(range(tdur$from,tdur$to))/1000
+
+  DE <- fetchDynamics(inputs)
+
+  # get the additional assignments in the argument list
+  additionalInds = (!names(inputs) %in% c(DE$names,"tdur")) & nchar(names(inputs))!=0 &
+    names(inputs) != "t"  # t is a special input
+  additionalAssignments = inputs[additionalInds]
+
+  #create the initial condition vector
+  initstate = unlist( inputs[DE$names] )
+  if (length(initstate) != length(DE$names) )
+    stop(paste("Must specify an initial condition for every variable."))
+  soln = rkintegrate(
+			rkFunction(DE, additionalAssignments),
+			initstate,tstart=tdur$from,tend=tdur$to,dt=tdur$dt
+			)
+
+  # Return an object with functions for each of the dynamical variables,
+  # defined as NA outside the range of tdur$from to tdur$to.
+  # return interpolating functions
+  result <- list()
+  for (k in 1:length(DE$names)) result[[k]] <- approxfun( soln$t, soln$x[,k])
+  names(result) <- DE$names
+  return(result)
+}
+
+
+#' A simple Runge-Kutta integrator
+#'
+#' Integrates ordinary differential equations using a Runge-Kutta method
+#'
+#' @param fun the dynamical function with arguments \code{state} (a vector) and \code{t}.
+#' @param x0 the initial condition, a vector with one element for each state variable
+#' @param tstart starting time
+#' @param tend ending time for integration
+#' @param dt step size for integration
+#'
+#' @return a list containing \code{x}, a matrix of the state with one row for each
+#' time step and a vector \code{t} containing the times of those steps.
+#'
+#' @author Daniel Kaplan (\email{kaplan@@macalester.edu})
+#'
+#' @details
+#' This is mainly for internal use by integrateODE.
+
+rkintegrate <- function(fun,x0,tstart=0,tend=1,dt=NULL) {
+  if (is.null(dt)) {
+    dt <- if( tend > 0 ) min(.01, (tend - tstart)/100)
+        else max(-.01, (tend-tstart)/100)
+  }
+  nsteps <- round( .5+(tend-tstart)/dt);
+  xout <- matrix(0,nsteps+1,length(x0));
+  tout <- seq(tstart,tend,length=nsteps+1);
+  xout[1,] <- x0;
+  for (k in 2:(nsteps+1)) {
+      time = tout[k]
+      k1 <- dt*fun(x0,tout[k-1]);
+      k2 <- dt*fun(x0+k1/2,time);
+      k3 <- dt*fun(x0+k2/2,time);
+      k4 <- dt*fun(x0+k3,time);
+      x0 <- x0 + (k1+k4+(k2+k3)*2)/6;
+      xout[k,] <- x0;
+  }
+  return( list(x=xout,t=tout) );
+}
+
+```
+
+funciones 
+```{r}
+
+rungekutta <- function( h , f, f2, y1 ,y0 , cortes, formula )
+{
+  top    <- h*cortes
+  tis    <- seq(0,top,by = h )
+  yR     <- f(tis)
+  nombre <- paste(formula, " con h = ")
+  plot(tis,yR,pch = 15, col = "red", cex = 1, xlim = c(0, top), ylim = c(min(yR), max(yR) ), xlab = "x", ylab = "y",main = paste(nombre, h ) )
+  par(new = TRUE)
+  
+  sol    <- ode(c(y1,y0),tis,f2,parms=NULL,method = "rk4")
+  tabla  <- data.frame(sol)
+  
+  plot(tis,tabla[,2], pch = 15, col = "blue", cex = 0.5,xlim = c(0, top), ylim = c(min( tabla[,2] ), max( tabla[,2] )), xlab = "x", ylab = "y")
+  
+  legend("bottomright",
+         c("analytical",paste("rk4, h = ", h )),
+         lty = c(NA, NA), lwd = c(2, 1),
+         pch = c(16, 16),
+         col = c("red", "blue"))
+  error <- (yR-tabla[,2])/tabla[,2]
+  tablaError = data.frame(tis, round(yR, digits = 5),round(tabla[,2], digits = 5),round(error, digits = 5))
+  colnames(tablaError) <- c("x","y","y(RK4)","Error")
+  print(tablaError)
+  errorGlobal <- sum(error)/length(error)
+  cat("error global con h:",h," : ",errorGlobal,"\n")
+}
+
+
+estabilidad <- function( h , f, f2, y1 ,y0 , cortes )
+{ 
+  tis    <- seq(0,h*cortes,by = h )
+  yR     <- f(tis)
+  sol    <- ode(c(y1,y0),tis,f2,parms=NULL,method = "rk4")
+  tabla  <- data.frame(sol)
+  
+  
+  error <- (yR-tabla[,2])/tabla[,2]
+  tablaError <- data.frame(tis, round(yR, digits = 5),round(tabla[,2], digits = 5),round(error, digits = 5))
+  
+  
+  vp<-0
+  fn<-0
+  for(i in 1:10){
+    if(tablaError[i,3]<0.00001){
+      vp=vp+1
+    }else{
+      fn=fn+1
+    }
+  }
+  
+  print("sensibilidad")
+  
+  sensibilidad <- vp/(vp+fn)
+  print(vp)
+  print(fn)
+  print(sensibilidad)
+  
+  print("estabilidad")
+  
+  estabilidad<-function(z) 1+z
+  
+  Z <- function(h,lambda) h+lambda
+  lambda=-100
+  estabilidad(Z(h,lambda))
+}
+
+euler2 = function(f,f2,t0, y0, h, n) {
+  #Datos igualmente espaciados iniciando en x0 = a, paso h. "n" datos 
+    t = seq(t0, t0 + (n-1)*h, by = h) # n datos
+  y = rep(NA, times=n) # n datos
+  y[1]=y0
+  x = rep(NA, times=n) # n datos
+  x[1]=t0
+  for(i in 2:n ) x[i]= x[i-1]+h*f(t[i-1], x[i-1])
+  for(i in 2:n ) y[i]= y[i-1]+h*f2(t[i-1], y[i-1])
+  print(cbind(t,y)) # print
+  plot(t,y, pch=19, col="red") # gráfica
+  print (cbind(t,x))
+  plot(y,x,pch=19, col="blue")
+}
+
+euler1 = function(f, t0, y0, h, n) {
+  #Datos igualmente espaciados iniciando en x0 = a, paso h. "n" datos 
+  t = seq(t0, t0 + (n-1)*h, by = h) # n datos
+  y = rep(NA, times=n) # n datos
+  y[1]=y0
+  for(i in 2:n ) y[i]= y[i-1]+h*f(t[i-1], y[i-1])
+  print(cbind(t,y)) # print
+  plot(t,y, pch=19, col="red") # gráfica
+}
+
+```
+
+inicio
+```{r}
+require(deSolve)
+require(PolynomF)
+require(Matrix)
+require(mosaic)
+require(Deriv)
+
+a = sqrt(3)
+b = 1/4 
+c = 11 
+w = 1/2
+```
+
+
+punto 1
+```{r}
+f  <- function(t)  (exp((1/2) * (t - sqrt(1 + 4 * sqrt(3)) * t)) * ((sqrt(1 + 4 * sqrt(3)) - 2) * exp(sqrt(1 + 4 * sqrt(3)) * t) + 2 + sqrt(1 + 4 * sqrt(3))))/sqrt(1 + 4 * sqrt(3))
+
+f2 <- function(t,y,parms) list(c(y[2],a *y[1]+y[2]))
+
+# h, funcion1, funcion2, y1, y0, cantidad, nombre
+rungekutta( 0.1 , f, f2 , 2 , -1, 20, "X''-aX-X'=0")
+rungekutta( 0.2 , f, f2 , 2 , -1, 20, "X''-aX-X'=0")
+```
+
+punto 2
+```{r}
+xprima = function(x,y) 3*x-b*y
+yprima <- function(x,y) 5*x-4*y
+euler2( xprima, yprima, 3 , 6 , 0.1 , 10 )
+```
+
+punto 3 
+```{r}
+f  <- function(x) x + (exp(x/2)*sin((sqrt(3)*x)/2))/sqrt(3) + exp(x/2)*cos((sqrt(3)*x)/2)  
+
+f2 <- function(t,y,parms) list(c( y[2] , y[2]+t-y[1]-1 ))
+
+rungekutta( 0.1 , f, f2, 1, 2 , 20 , "Y''-Y'-X+Y+1=0")
+```
+
+punto 4 
+```{r}
+f = function(t,u) cos(2*t)-u*(t-2*pi)*cos(2*(t-2*pi))
+euler1(f, 4, 0, 0.1, 10)
+```
+
+punto 5
+```{r}
+f  <- function(t)  (exp((1/2) * (t - sqrt(1 + 4 * sqrt(3)) * t)) * ((sqrt(1 + 4 * sqrt(3)) - 2) * exp(sqrt(1 + 4 * sqrt(3)) * t) + 2 + sqrt(1 + 4 * sqrt(3))))/sqrt(1 + 4 * sqrt(3))
+
+f2 <- function(t,y,parms) list(c(y[2],a *y[1]+y[2]))
+
+estabilidad( 0.1 , f, f2 , 2 , -1, 20)
+```
+
+punto 6 
+```{r}
+
+L = 10 #m
+q = 1460 #N/m
+E = 20.7 * 10.7 #kPa
+S = 4.4 #kN
+I = 5 #m 4 .
+defleccion <- function(L,q,E,S,I,x){ S/(E*I)*w + q*x/(2*E*I)+(x-L)}
+
+defleccion(L,q,E,S,I, 2 )
+```
+
+punto 7 
+```{r}
+
+# 5x'' + 33x' + x - 5 = 0 
+# x''(0) = 2
+# x'(0) = 1
+# x(0) = 0
+
+sol <- integrateODE(dx~ 5*x2 + 33*x1 + x - 5, x2=2, x1=1, x = 0, xdur=list(from=0,to=50)  )
+
+print(sol$x(1))
+
+```
+
+punto 8
+```{r}
+
+rungekutta = function(f,t0,y0,h,n)
+{
+  t = seq(t0, t0+n*h, by=h)
+  y = rep(NA, times=(n+1))
+  y[1] = y0
+  for(k in 2:(n+1))
+  {
+    k1=h/2*f(t[k-1],y[k-1])
+    k2=h/2*f(t[k-1]+h/2, y[k-1]+k1)
+    k3=h/2*f(t[k-1]+h/2, y[k-1]+k2)
+    k4=h/2*f(t[k-1]+h, y[k-1]+2*k3)
+    y[k] = y[k-1]+1/3*(k1+2*k2+2*k3+k4)
+  }
+  dat = cbind(t,y)
+  print(as.matrix(dat))
+  plot(t,y,pch=20, col="red")
+}
+
+options(digits = 4) 
+t0=0; y0=0; h= 0.1; n= 10 
+
+f   <- function(x,y) 3*x+7*y
+rungekutta(f,t0,y0,h,n)
+
+f2f <- function(x,y) x+w*y
+rungekutta(f2f,t0,y0,h,n)
+
+
+```
+
