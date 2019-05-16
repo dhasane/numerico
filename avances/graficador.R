@@ -31,13 +31,13 @@ findMin <- function(lisx, lisy, liminf, limsup)
     
     ttam <- limsup - liminf
     ret  <- spline( valx , valy , n = ttam , method = metodo)
-    ry   <- ret$y
+    ry   <- ret$yx
     
     intersec <- 0
     
     
     
-    #lines(spline(valx, valy, n = ttam, method = metodo), col = 3)
+    lines(spline(valx, valy, n = ttam, method = metodo), col = 3)
     
     for( j in 1:ttam )
     {
