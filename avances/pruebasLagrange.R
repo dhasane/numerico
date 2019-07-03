@@ -84,6 +84,11 @@ y <- c(148, 126, 159, 118, 149, 130, 151, 142, 114, 141)
 y = ordenar(x,y) 
 x = sort(x)
 
+
+plot(x,y,type="l",asp=1,main="Mano")
+
+
+
 dat <- data.frame(cbind(x, y))
 
 lagrange.poly(x,y)
